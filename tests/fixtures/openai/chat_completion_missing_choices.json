@@ -1,0 +1,11 @@
+{
+  "id": "chatcmpl-invalid-no-choices",
+  "object": "chat.completion",
+  "model": "test-model",
+  "usage": {
+    "prompt_tokens": 5,
+    "completion_tokens": 3,
+    "total_tokens": 8
+  },
+  "private_data": "PRIVATE_MALFORMED_OPENAI_OUTPUT"
+}

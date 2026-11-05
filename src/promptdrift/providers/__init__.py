@@ -2,8 +2,16 @@ from .base import Provider
 from .mock import MockProvider
 from .ollama import OllamaProvider
 from .openai import OpenAIProvider
+from .resilience import ResilienceExecutor
 
-__all__ = ["Provider", "MockProvider", "OllamaProvider", "OpenAIProvider", "create_provider"]
+__all__ = [
+    "MockProvider",
+    "OllamaProvider",
+    "OpenAIProvider",
+    "Provider",
+    "ResilienceExecutor",
+    "create_provider",
+]
 
 
 def create_provider(config):

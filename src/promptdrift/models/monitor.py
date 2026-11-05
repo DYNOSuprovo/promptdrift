@@ -9,6 +9,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
+from .provenance import Provenance
+
 Diagnosis = Literal[
     "stable",
     "observed_model_drift",
@@ -35,6 +37,10 @@ class MonitorCase(BaseModel):
     provider_errors: int = 0
     output_changes: int = 0
     evidence: list[str] = Field(default_factory=list)
+    output_hash: str | None = None
+    assertions: dict[str, bool] = Field(default_factory=dict)
+    metrics: dict[str, float | int | None] = Field(default_factory=dict)
+    provenance: Provenance | None = None
 
 
 class MonitorReport(BaseModel):

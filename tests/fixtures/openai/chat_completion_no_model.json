@@ -1,0 +1,21 @@
+{
+  "id": "chatcmpl-test-no-model",
+  "object": "chat.completion",
+  "created": 1767225600,
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Hello WITHOUT_MODEL_SENTINEL"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 5,
+    "completion_tokens": 3,
+    "total_tokens": 8
+  },
+  "system_fingerprint": "fp_test_123"
+}

@@ -91,6 +91,7 @@ tests:
 | `id` | string | Yes | — | Unique test identifier |
 | `prompt` | string | Yes | — | Path to the Jinja2 prompt template |
 | `variables` | dict | No | `{}` | Key-value pairs passed to the template |
+| `request_envelope` | object | No | — | Declared `system`, `tools` and `retrieval_context` for provenance hashing only; see [baselines](baselines.md#request-envelopes) |
 | `assertions` | list | No | `[]` | Deterministic behavioral contracts |
 | `thresholds` | dict | No | `{}` | `latency_ms` and `cost_usd` limits; unknown cost cannot satisfy a limit |
 | `output` | object | No | `{format: text}` | `format: json` adds a JSON-validity contract |
@@ -117,3 +118,37 @@ PromptDrift uses Pydantic models with `extra="forbid"`. Unknown fields cause val
 The old `ci` defaults (`fail_on: [assertion_failure]`, `warn_on: [semantic_change, latency_regression]`) are accepted only for compatibility, **not a configurable engine policy**. Use `severity: warn` or `severity: fail` and explicit numeric thresholds instead. The defaults never enable semantic evaluation or automatic latency-delta failure.
 
 Monitoring uses these same contracts plus CLI `--samples`/`--no-history`; it does not introduce a competing configuration file. See [monitoring](monitoring.md).
+
+## JUnit XML Reports
+
+PromptDrift can export evaluation results in JUnit XML format for integration
+with CI test reporting tools.
+
+Use the `--junit-xml` option with either the `test` or `check` command:
+
+```bash
+promptdrift test --junit-xml test-results.xml
+```
+
+```bash
+promptdrift check --junit-xml test-results.xml
+```
+
+You can also specify a custom output location:
+
+```bash
+promptdrift check --config promptdrift.yaml --junit-xml reports/test-results.xml
+```
+
+Parent directories are created automatically when they do not exist.
+
+Each PromptDrift test is represented as a JUnit testcase. Execution times
+are reported in seconds. Failed assertions include their diagnostic reason,
+expected value, and actual value in the `<failure>` element.
+
+Warnings are represented as passing testcases, with their diagnostic reasons
+included in `<system-out>`. This allows CI platforms to display warnings
+without treating them as test failures.
+
+The XML report is written before the CLI returns its failure exit code,
+so CI workflows can still collect test results when evaluations fail.

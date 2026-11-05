@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from promptdrift.engine.provenance import fingerprint, with_response
+from promptdrift.errors import ProviderBudgetExceededError
 from promptdrift.evaluators import evaluate_assertion
 from promptdrift.models import Config, RegressionReport, TestRun
 from promptdrift.models.result import EvaluationResult, ModelResponse
@@ -80,6 +81,11 @@ def run_suite(config: Config, config_path: Path) -> RegressionReport:
         (test, render_prompt(config.resolve_path(config_path, test.prompt), test.variables))
         for test in config.tests
     ]
+    request_budget = config.provider.resilience.request_budget
+    if request_budget is not None and len(prepared) > request_budget:
+        raise ProviderBudgetExceededError(
+            f"Planned requests ({len(prepared)}) exceed request budget ({request_budget})"
+        )
     provider = create_provider(config.provider)
     runs: list[TestRun] = []
     for test, prompt in prepared:

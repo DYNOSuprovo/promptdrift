@@ -51,6 +51,7 @@ Each schema-v3 baseline case records:
 | `contract_hash` | Ordered assertions, severities/names, thresholds and output-format contract |
 | `engine_version` | PromptDrift version used for the observation |
 | Optional response hashes | Provider-returned resolved model ID/system fingerprint, when available |
+| Optional `envelope_hashes` | One hash each for the declared [request envelope](baselines.md#request-envelopes) `system`, `tools` (in name order) and `retrieval_context`, after credential stripping |
 
 JSON is canonicalized before hashing. Moving a project or reordering mapping keys does not by itself change these fingerprints. Whitespace changes to the rendered request do. API-key rotation under an otherwise equivalent endpoint is not considered a configuration change; different routing attached to credentials remains **unobserved context**.
 
@@ -60,7 +61,7 @@ Per-case provenance is retained for unaccepted cases in selective baseline updat
 
 1. **`provider_error`:** any probe raised a safe provider error. Missing credentials, timeouts, rate limits and malformed text-completion payloads are not evidence of a model update. This version does not separately classify auth vs rate limiting vs outage in the monitor report.
 2. **`new_test`:** no baseline entry for the active case.
-3. **Changed monitored inputs:** prompt, generation configuration, configured provider, or contract hash differs. All differences appear in `evidence`; the first label is a triage category, not proof it caused the failure.
+3. **Changed monitored inputs:** prompt, generation configuration, configured provider, or contract hash differs. All differences appear in `evidence`; the first label is a triage category, not proof it caused the failure. A changed, added or removed request envelope is triaged as `prompt_changed`, with evidence naming each drifted component (for example `request_envelope.tools differs from the accepted baseline.`).
 4. **`insufficient_evidence`:** missing legacy provenance, changed PromptDrift version, or an unhealthy accepted baseline prevents before/after attribution.
 5. **`stochastic_behavior`:** some but not all successful repeated probes fail behavioral contracts. This is observed variability, not a diagnosis of its cause. CI still fails on any fail-severity violation.
 6. **`observed_model_drift`:** at least two probes all fail behavioral contracts, the baseline was healthy, and all recorded comparison inputs match. This is a deterministic **heuristic**, not a probability or proof of changed model weights.

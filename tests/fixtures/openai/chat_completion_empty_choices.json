@@ -1,0 +1,7 @@
+{
+  "id": "chatcmpl-invalid-empty-choices",
+  "object": "chat.completion",
+  "model": "test-model",
+  "choices": [],
+  "private_data": "PRIVATE_EMPTY_CHOICES_SENTINEL"
+}

@@ -107,6 +107,60 @@ jobs:
 
 Fork PR comments are disabled. **`pull_request_target` execution is refused entirely**, even when comments are disabled. Never use a privileged event to check out or execute a fork's code. Do not expose provider secrets to untrusted PR code, dependencies or configuration.
 
+## Publishing JUnit XML test results
+
+The PromptDrift CLI supports JUnit XML output through `--junit-xml`.
+This can be used with GitHub Actions and third-party test reporting actions
+to publish evaluation results directly in CI.
+
+The following example assumes PromptDrift is already installed in the
+workflow environment:
+
+```yaml
+name: PromptDrift JUnit Reports
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+  actions: read
+  checks: write
+
+jobs:
+  promptdrift:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Run PromptDrift checks
+        run: |
+          promptdrift check \
+            --config promptdrift.yaml \
+            --junit-xml test-results.xml
+
+      - name: Publish JUnit test results
+        if: always()
+        uses: dorny/test-reporter@v3
+        with:
+          name: PromptDrift Results
+          path: test-results.xml
+          reporter: java-junit
+```
+
+The reporting step uses `if: always()` so it runs even when PromptDrift
+returns a non-zero exit code. The CLI writes the XML report before exiting
+on evaluation failures.
+
+The GitHub Check Runs API requires `checks: write` permission. Workflows
+triggered by pull requests from forks receive read-only tokens, so this
+publishing approach cannot create check runs for those contributions.
+For public repositories, upload the XML as a workflow artifact and publish
+it from a separate trusted `workflow_run` workflow instead.
+
+Do not use `pull_request_target` to execute untrusted pull-request code.
 ## Opt-in scheduled monitoring
 
 [`../.github/workflows/monitor-example.yml`](../.github/workflows/monitor-example.yml) is a manual, repository-variable-gated **offline mock** example. Its schedule is commented out; no paid provider job is enabled by this change.

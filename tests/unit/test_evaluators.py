@@ -276,6 +276,42 @@ class TestLatency:
         result = evaluate_assertion(Assertion(type="latency_ms", value=12), response(latency_ms=12))
         assert result.passed
 
+    def test_passes_within_tolerance(self):
+        result = evaluate_assertion(
+            Assertion(type="latency_ms", value=100, tolerance_percent=10),
+            response(latency_ms=108),
+        )
+        assert result.passed
+        assert "within 10% tolerance" in result.reason
+
+    def test_fails_when_exceeding_tolerance(self):
+        result = evaluate_assertion(
+            Assertion(type="latency_ms", value=100, tolerance_percent=10),
+            response(latency_ms=111),
+        )
+        assert not result.passed
+
+    def test_zero_tolerance(self):
+        result = evaluate_assertion(
+            Assertion(type="latency_ms", value=100, tolerance_percent=0),
+            response(latency_ms=100),
+        )
+        assert result.passed
+
+    def test_zero_tolerance_rejects_over_limit(self):
+        result = evaluate_assertion(
+            Assertion(type="latency_ms", value=100, tolerance_percent=0),
+            response(latency_ms=101),
+        )
+        assert not result.passed
+
+    def test_omitted_tolerance_remains_strict(self):
+        result = evaluate_assertion(
+            Assertion(type="latency_ms", value=100),
+            response(latency_ms=101),
+        )
+        assert not result.passed
+
 
 # --- cost_usd ---
 
@@ -300,6 +336,42 @@ class TestCost:
         result = evaluate_assertion(Assertion(type="cost_usd", value=0.01), resp)
         assert not result.passed
         assert result.actual is None
+
+    def test_passes_within_tolerance(self):
+        result = evaluate_assertion(
+            Assertion(type="cost_usd", value=0.01, tolerance_percent=10),
+            response(cost=0.0108),
+        )
+        assert result.passed
+        assert "within 10% tolerance" in result.reason
+
+    def test_fails_when_exceeding_tolerance(self):
+        result = evaluate_assertion(
+            Assertion(type="cost_usd", value=0.01, tolerance_percent=10),
+            response(cost=0.0111),
+        )
+        assert not result.passed
+
+    def test_zero_tolerance(self):
+        result = evaluate_assertion(
+            Assertion(type="cost_usd", value=0.01, tolerance_percent=0),
+            response(cost=0.01),
+        )
+        assert result.passed
+
+    def test_zero_tolerance_rejects_over_limit(self):
+        result = evaluate_assertion(
+            Assertion(type="cost_usd", value=0.01, tolerance_percent=0),
+            response(cost=0.0101),
+        )
+        assert not result.passed
+
+    def test_omitted_tolerance_remains_strict(self):
+        result = evaluate_assertion(
+            Assertion(type="cost_usd", value=0.01),
+            response(cost=0.0101),
+        )
+        assert not result.passed
 
 
 # --- unsupported ---

@@ -18,23 +18,31 @@ class ProviderError(PromptDriftError):
 
 
 class ProviderAuthError(ProviderError):
-    """Authentication or authorization failure with the provider."""
+    """Provider authentication failed or API key is missing (non-retryable)."""
 
 
 class ProviderRateLimitError(ProviderError):
-    """Rate limit or concurrency quota exceeded with the provider."""
+    """Provider rate limit reached, e.g. HTTP 429 (retryable)."""
+
+
+class ProviderTransportError(ProviderError):
+    """Network connection, DNS, or transient server error 502/503/504 (retryable)."""
+
+
+# Alias for backward compatibility with ProviderConnectionError
+ProviderConnectionError = ProviderTransportError
 
 
 class ProviderTimeoutError(ProviderError):
-    """Provider request timed out."""
-
-
-class ProviderConnectionError(ProviderError):
-    """Network connection or unreachable host error with the provider."""
+    """Per-request timeout expired or cumulative timeout budget exceeded."""
 
 
 class ProviderResponseError(ProviderError):
-    """Provider returned a malformed or unexpected response payload."""
+    """Provider returned malformed, invalid, or client-error response (non-retryable)."""
+
+
+class ProviderBudgetExceededError(ProviderError):
+    """Planned or actual requests exceeded the configured request budget."""
 
 
 class EvaluationError(PromptDriftError):

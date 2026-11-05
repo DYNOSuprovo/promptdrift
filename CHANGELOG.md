@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `history`: bounded project-local monitoring history; `demo`: a temporary loopback-only synthetic drift incident through the real adapter.
 - Opt-in Action monitor mode and deduplicated scheduled/manual GitHub failure issues; synthetic and real-provider monitoring examples.
 - Source-linked ecosystem comparison and documented attribution/privacy limits.
+- Optional per-test `request_envelope` (system message, tool schemas, static retrieval context) with credential-stripped, per-component provenance hashes; monitoring evidence names the drifted component.
 
 ### Fixed
 - Isolated tests from the real home directory and working tree.

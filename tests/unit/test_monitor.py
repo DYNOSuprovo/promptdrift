@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -12,7 +13,13 @@ from promptdrift.cli import app
 from promptdrift.engine.baseline import load_baseline, write_baseline
 from promptdrift.engine.monitor import monitor_suite
 from promptdrift.engine.runner import run_suite
-from promptdrift.errors import BaselineError, ConfigError, ProviderError, TemplateError
+from promptdrift.errors import (
+    BaselineError,
+    ConfigError,
+    PromptDriftError,
+    ProviderError,
+    TemplateError,
+)
 from promptdrift.models import Config
 from promptdrift.models.result import ModelResponse
 from promptdrift.models.test import Assertion
@@ -246,6 +253,64 @@ def test_history_retention_order_and_read_only_empty(monitored, tmp_path):
     ]
 
 
+def test_history_retention_keeps_exact_limit(monitored):
+    config, path = monitored
+    runs = [monitor_suite(config, path, samples=1) for _ in range(3)]
+
+    for report in runs:
+        save_monitor_report(report, history_path(path), retention=3)
+
+    history = load_monitor_history(history_path(path))
+
+    assert [run["run_id"] for run in history] == [
+        runs[2].run_id,
+        runs[1].run_id,
+        runs[0].run_id,
+    ]
+
+
+@pytest.mark.parametrize("retention", [0, -1])
+def test_history_rejects_invalid_retention(monitored, retention):
+    config, path = monitored
+    report = monitor_suite(config, path, samples=1)
+
+    with pytest.raises(ValueError, match="retention must be positive"):
+        save_monitor_report(report, history_path(path), retention=retention)
+
+
+def test_history_schema_version_is_set(monitored):
+    config, path = monitored
+    report = monitor_suite(config, path, samples=1)
+    history_db = history_path(path)
+
+    save_monitor_report(report, history_db)
+
+    with sqlite3.connect(history_db) as db:
+        version = db.execute("PRAGMA user_version").fetchone()[0]
+
+    assert version == 1
+
+
+def test_history_migrates_legacy_schema(monitored):
+    config, path = monitored
+    history_db = history_path(path)
+
+    # Create the legacy schema used before schema versioning.
+    history_db.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(history_db) as db:
+        db.execute("CREATE TABLE monitor_runs (run_id TEXT PRIMARY KEY, report_json TEXT NOT NULL)")
+
+    report = monitor_suite(config, path, samples=1)
+    save_monitor_report(report, history_db)
+
+    with sqlite3.connect(history_db) as db:
+        version = db.execute("PRAGMA user_version").fetchone()[0]
+        rows = db.execute("SELECT report_json FROM monitor_runs").fetchall()
+
+    assert version == 1
+    assert len(rows) == 1
+
+
 def test_cli_history_and_no_history_option(monitored):
     _, path = monitored
     runner = CliRunner()
@@ -258,6 +323,27 @@ def test_cli_history_and_no_history_option(monitored):
     history = runner.invoke(app, ["history", "-c", str(path), "--json"])
     assert history.exit_code == 0
     assert json.loads(history.output)["runs"][0]["run_id"] == run_id
+
+
+def test_cli_history_never_calls_provider(monitored, monkeypatch):
+    config, path = monitored
+
+    # Create history before blocking provider calls.
+    report = monitor_suite(config, path, samples=1)
+    save_monitor_report(report, history_path(path))
+
+    def fail_provider_call(*args, **kwargs):
+        raise AssertionError("Provider should not be called while reading history")
+
+    monkeypatch.setattr(MockProvider, "complete", fail_provider_call)
+
+    result = CliRunner().invoke(
+        app,
+        ["history", "-c", str(path), "--json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["runs"][0]["run_id"] == report.run_id
 
 
 @pytest.mark.parametrize("failure", ["missing", "corrupt", "invalid_samples", "invalid_yaml"])
@@ -352,3 +438,128 @@ def test_warning_contract_does_not_become_model_drift(monitored, monkeypatch):
     assert report.tests[0].status == "WARN"
     assert report.tests[0].diagnosis == "insufficient_evidence"
     assert report.exit_code == 0
+
+
+def test_history_rejects_newer_schema(monitored):
+    config, path = monitored
+    history_db = history_path(path)
+
+    history_db.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(history_db) as db:
+        db.execute("CREATE TABLE monitor_runs (run_id TEXT PRIMARY KEY, report_json TEXT NOT NULL)")
+        db.execute("PRAGMA user_version = 99")
+
+    report = monitor_suite(config, path, samples=1)
+
+    with pytest.raises(PromptDriftError, match="newer"):
+        save_monitor_report(report, history_db)
+
+
+def test_history_read_rejects_newer_schema(tmp_path):
+    history_db = tmp_path / "history.sqlite3"
+
+    with sqlite3.connect(history_db) as db:
+        db.execute("CREATE TABLE monitor_runs (run_id TEXT PRIMARY KEY, report_json TEXT NOT NULL)")
+        db.execute("PRAGMA user_version = 99")
+        db.commit()
+
+    with pytest.raises(PromptDriftError, match="newer"):
+        load_monitor_history(history_db)
+
+
+def test_history_rejects_incompatible_table_schema(tmp_path):
+    history_db = tmp_path / "history.sqlite3"
+
+    with sqlite3.connect(history_db) as db:
+        db.execute("CREATE TABLE monitor_runs (run_id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
+        db.commit()
+
+    with pytest.raises(PromptDriftError, match="incompatible"):
+        load_monitor_history(history_db)
+
+
+def test_history_read_does_not_migrate_legacy_schema(tmp_path):
+    history_db = tmp_path / "history.sqlite3"
+    report_json = json.dumps({"run_id": "legacy-run", "counts": {"PASS": 1}})
+
+    with sqlite3.connect(history_db) as db:
+        db.execute("CREATE TABLE monitor_runs (run_id TEXT PRIMARY KEY, report_json TEXT NOT NULL)")
+        db.execute(
+            "INSERT INTO monitor_runs (run_id, report_json) VALUES (?, ?)",
+            ("legacy-run", report_json),
+        )
+        db.commit()
+
+    history = load_monitor_history(history_db)
+
+    assert history == [{"run_id": "legacy-run", "counts": {"PASS": 1}}]
+
+    with sqlite3.connect(history_db) as db:
+        version = db.execute("PRAGMA user_version").fetchone()[0]
+
+    assert version == 0
+
+
+def test_history_corruption_has_clear_recovery_message(tmp_path, monkeypatch):
+    history_db = tmp_path / "history.sqlite3"
+    history_db.write_bytes(b"not a sqlite database")
+
+    with pytest.raises(PromptDriftError, match="corrupted"):
+        load_monitor_history(history_db)
+
+
+def test_history_locked_database_has_clear_recovery_message(tmp_path, monkeypatch):
+    history_db = tmp_path / "history.sqlite3"
+    history_db.touch()
+
+    def locked_connect(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(sqlite3, "connect", locked_connect)
+
+    with pytest.raises(PromptDriftError, match="locked"):
+        load_monitor_history(history_db)
+
+
+def test_history_other_database_error_uses_generic_message(tmp_path, monkeypatch):
+    history_db = tmp_path / "history.sqlite3"
+    history_db.touch()
+
+    def failing_connect(*args, **kwargs):
+        raise sqlite3.Error("unexpected sqlite failure")
+
+    monkeypatch.setattr(sqlite3, "connect", failing_connect)
+
+    with pytest.raises(
+        PromptDriftError,
+        match="unreadable; back up or remove the local history database",
+    ):
+        load_monitor_history(history_db)
+
+
+def test_history_save_locked_database_has_clear_recovery_message(monitored, monkeypatch):
+    config, path = monitored
+    history_db = history_path(path)
+    report = monitor_suite(config, path, samples=1)
+
+    def locked_connect(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(sqlite3, "connect", locked_connect)
+
+    with pytest.raises(PromptDriftError, match="locked"):
+        save_monitor_report(report, history_db)
+
+
+def test_history_save_corrupted_database_has_clear_recovery_message(monitored, monkeypatch):
+    config, path = monitored
+    history_db = history_path(path)
+    report = monitor_suite(config, path, samples=1)
+
+    def corrupted_connect(*args, **kwargs):
+        raise sqlite3.DatabaseError("file is not a database")
+
+    monkeypatch.setattr(sqlite3, "connect", corrupted_connect)
+
+    with pytest.raises(PromptDriftError, match="corrupted"):
+        save_monitor_report(report, history_db)

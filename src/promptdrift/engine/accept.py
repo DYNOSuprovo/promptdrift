@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from promptdrift.engine.baseline import baseline_from_report
 from promptdrift.errors import BaselineError, PromptDriftError
 from promptdrift.impact import ImpactRadiusReport
-from promptdrift.models.baseline import Baseline
+from promptdrift.models import Config
+from promptdrift.models.baseline import Baseline, BaselineTest
 from promptdrift.models.result import RegressionReport
 
 
@@ -97,3 +100,133 @@ def selective_accept(
         prompt_hash=impact.current_prompt_hash,
         tests=merged_tests,
     )
+
+
+def accept_from_history(
+    config: Config,
+    config_path: Path,
+    run_id: str,
+    *,
+    scenario_ids: list[str] | None = None,
+    accept_regressions: bool = False,
+    force: bool = False,
+) -> Baseline:
+    """Promote reviewed observations from monitoring history to canonical baseline without provider calls."""
+    from datetime import UTC, datetime
+
+    from promptdrift import __version__
+    from promptdrift.engine.baseline import atomic_write, load_baseline
+    from promptdrift.engine.baseline_history import archive_baseline
+    from promptdrift.engine.suite import resolve_suite
+    from promptdrift.git import GitContext
+    from promptdrift.storage.history import history_path, load_monitor_run_by_id
+
+    hist_file = history_path(config_path)
+    report = load_monitor_run_by_id(hist_file, run_id)
+
+    baseline_path = config.resolve_path(config_path, config.baseline.path)
+    if baseline_path.exists() and not force:
+        raise BaselineError(f"Baseline already exists: {baseline_path}. Use --force to replace it.")
+
+    active, _ = resolve_suite(config, config_path)
+    active_test_ids = {t.id for t in active.tests}
+    active_tests_by_id = {t.id: t for t in active.tests}
+    report_cases_by_id = {c.test_id: c for c in report.tests}
+
+    if scenario_ids:
+        unknown_requested = set(scenario_ids) - active_test_ids
+        if unknown_requested:
+            raise BaselineError(
+                f"Requested scenario(s) not found in active suite: {', '.join(sorted(unknown_requested))}"
+            )
+        missing_in_run = set(scenario_ids) - set(report_cases_by_id.keys())
+        if missing_in_run:
+            raise BaselineError(
+                f"Requested scenario(s) not found in history run '{run_id}': {', '.join(sorted(missing_in_run))}"
+            )
+        target_ids = scenario_ids
+    else:
+        missing_in_run = active_test_ids - set(report_cases_by_id.keys())
+        if missing_in_run:
+            raise BaselineError(
+                f"History run '{run_id}' is incompatible with the active suite: missing cases: {', '.join(sorted(missing_in_run))}"
+            )
+        target_ids = [t.id for t in active.tests]
+
+    failing_cases: list[str] = []
+    from promptdrift.engine.provenance import fingerprint
+    from promptdrift.templates import render_prompt
+
+    for test_id in target_ids:
+        test = active_tests_by_id[test_id]
+        case = report_cases_by_id[test_id]
+        if case.output_hash is None:
+            raise BaselineError(
+                f"Case '{test_id}' in history run '{run_id}' has no observed output hash to promote."
+            )
+        if case.provenance is not None:
+            prompt_str = render_prompt(
+                active.resolve_path(config_path, test.prompt), test.variables
+            )
+            current_prov = fingerprint(active, test, prompt_str)
+            if (
+                case.provenance.input_hash != current_prov.input_hash
+                or case.provenance.configuration_hash != current_prov.configuration_hash
+                or case.provenance.contract_hash != current_prov.contract_hash
+                or case.provenance.provider_hash != current_prov.provider_hash
+            ):
+                raise BaselineError(
+                    f"Case '{test_id}' in history run '{run_id}' has mismatched provenance with current test configuration. "
+                    "The prompt, configuration, contracts, or provider have changed since this run was recorded."
+                )
+        if case.status in ("FAIL", "ERROR") or case.failures > 0 or case.provider_errors > 0:
+            failing_cases.append(test_id)
+
+    if failing_cases and not accept_regressions:
+        raise BaselineError(
+            f"Cannot accept {len(failing_cases)} failing scenario(s) from run '{run_id}' without --accept-regressions:\n"
+            + "\n".join(f"  - {tid}" for tid in failing_cases)
+        )
+
+    merged_tests: dict[str, BaselineTest] = {}
+    if baseline_path.is_file():
+        existing_baseline = load_baseline(baseline_path)
+        for tid, btest in existing_baseline.tests.items():
+            merged_tests[tid] = btest
+
+    for test_id in target_ids:
+        case = report_cases_by_id[test_id]
+        status = (
+            "PASS"
+            if case.status == "PASS"
+            else ("FAIL" if case.status in ("FAIL", "ERROR") else case.status)
+        )
+        merged_tests[test_id] = BaselineTest(
+            output_hash=case.output_hash,  # type: ignore[arg-type]
+            provenance=case.provenance,
+            status=status,
+            assertions=case.assertions,
+            metrics=case.metrics,
+            evaluator_scores={},
+            metadata={"promoted_from_run_id": run_id},
+        )
+
+    git_sha = GitContext().get_head_sha()
+
+    new_baseline = Baseline(
+        schema_version=3,
+        promptdrift_version=__version__,
+        generated_at=datetime.now(UTC),
+        provider={"type": report.provider, "model": report.model},
+        prompt_revision=None,
+        git_sha=git_sha,
+        prompt_hash=None,
+        tests=merged_tests,
+    )
+
+    if baseline_path.is_file():
+        archive_baseline(baseline_path)
+
+    baseline_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write(baseline_path, new_baseline.model_dump_json(indent=2) + "\n")
+    return new_baseline

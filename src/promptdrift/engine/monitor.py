@@ -11,10 +11,10 @@ import hashlib
 from pathlib import Path
 
 from promptdrift.engine.baseline import load_baseline
-from promptdrift.engine.provenance import fingerprint, with_response
+from promptdrift.engine.provenance import ENVELOPE_COMPONENTS, fingerprint, with_response
 from promptdrift.engine.runner import evaluate_response, evaluation_status
 from promptdrift.engine.suite import resolve_suite
-from promptdrift.errors import ConfigError, ProviderError
+from promptdrift.errors import ConfigError, ProviderBudgetExceededError, ProviderError
 from promptdrift.models import BaselineTest, Config, TestCase
 from promptdrift.models.monitor import Diagnosis, MonitorCase, MonitorReport
 from promptdrift.models.provenance import Provenance
@@ -51,6 +51,21 @@ def _diagnose(
             if getattr(old.provenance, field) != getattr(current, field):
                 changed_fields.append(label)
                 evidence.append(f"{field} differs from the accepted baseline.")
+        # Envelope components are part of the request, so they triage as prompt_changed.
+        before, after = old.provenance.envelope_hashes, current.envelope_hashes
+        if (before is None) != (after is None):
+            changed_fields.append("prompt_changed")
+            evidence.append(
+                f"request_envelope was {'added' if before is None else 'removed'} "
+                "since the accepted baseline."
+            )
+        elif before is not None and after is not None:
+            for component in ENVELOPE_COMPONENTS:
+                if before.get(component) != after.get(component):
+                    changed_fields.append("prompt_changed")
+                    evidence.append(
+                        f"request_envelope.{component} differs from the accepted baseline."
+                    )
     if errors:
         return (
             "provider_error",
@@ -124,12 +139,24 @@ def monitor_suite(config: Config, config_path: Path, *, samples: int = 3) -> Mon
     for test in active.tests:
         prompt = render_prompt(active.resolve_path(config_path, test.prompt), test.variables)
         prepared.append((test, prompt, fingerprint(active, test, prompt)))
+
+    request_budget = active.provider.resilience.request_budget
+    planned_requests = len(prepared) * samples
+    if request_budget is not None and planned_requests > request_budget:
+        raise ProviderBudgetExceededError(
+            f"Planned requests ({planned_requests}) exceed request budget ({request_budget})"
+        )
+
     provider = create_provider(active.provider)
     results = []
     for test, prompt, provenance in prepared:
         old = baseline.tests.get(test.id)
         failures = behavioral_failures = errors = changes = warnings = 0
         signals: set[str] = set()
+        observed_output_hash: str | None = None
+        observed_assertions: dict[str, bool] = {}
+        observed_metrics: dict[str, float | int | None] = {}
+        observed_provenance: Provenance | None = None
         for _ in range(samples):
             try:
                 response = provider.complete(
@@ -150,9 +177,20 @@ def monitor_suite(config: Config, config_path: Path, *, samples: int = 3) -> Mon
                 and assertion.type not in OPERATIONAL_ASSERTIONS
                 for assertion, result in zip(test.assertions, evaluations, strict=False)
             ) or (test.output.format == "json" and not evaluations[len(test.assertions)].passed)
+            observed = with_response(provenance, response)
+            observed_output_hash = hashlib.sha256(response.output.encode()).hexdigest()
+            observed_assertions = {
+                evaluation.assertion: evaluation.passed for evaluation in evaluations
+            }
+            observed_metrics = {
+                "latency_ms": response.latency_ms,
+                "input_tokens": response.input_tokens,
+                "output_tokens": response.output_tokens,
+                "estimated_cost_usd": response.estimated_cost_usd,
+            }
+            observed_provenance = observed
             if old:
-                changes += hashlib.sha256(response.output.encode()).hexdigest() != old.output_hash
-                observed = with_response(provenance, response)
+                changes += observed_output_hash != old.output_hash
                 if old.provenance:
                     for field in ("response_model_hash", "system_fingerprint_hash"):
                         before, after = getattr(old.provenance, field), getattr(observed, field)
@@ -204,6 +242,10 @@ def monitor_suite(config: Config, config_path: Path, *, samples: int = 3) -> Mon
                 provider_errors=errors,
                 output_changes=changes,
                 evidence=evidence,
+                output_hash=observed_output_hash,
+                assertions=observed_assertions,
+                metrics=observed_metrics,
+                provenance=observed_provenance,
             )
         )
     for missing in sorted(set(baseline.tests) - {test.id for test in active.tests}):

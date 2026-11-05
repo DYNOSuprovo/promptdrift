@@ -1,0 +1,13 @@
+{
+  "id": "chatcmpl-malformed",
+  "choices": [
+    {
+      "message": {
+        "content": "PRIVATE_MALFORMED_JSON_SENTINEL"
+      }
+    }
+  ]
+  "usage": {
+    "prompt_tokens": 5
+  }
+}

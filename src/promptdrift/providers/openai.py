@@ -4,25 +4,32 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Callable
 
 import httpx
 
-from promptdrift.errors import (
-    ProviderAuthError,
-    ProviderConnectionError,
-    ProviderError,
-    ProviderRateLimitError,
-    ProviderResponseError,
-    ProviderTimeoutError,
-)
+from promptdrift.errors import ProviderAuthError
 from promptdrift.models.result import ModelResponse
 
 from .base import Provider
+from .resilience import ResilienceExecutor
 
 
 class OpenAIProvider(Provider):
-    def __init__(self, config):
+    def __init__(
+        self,
+        config,
+        executor: ResilienceExecutor | None = None,
+        clock: Callable[[], float] = time.perf_counter,
+        sleeper: Callable[[float], None] = time.sleep,
+    ):
         self.config = config
+        self.executor = executor or ResilienceExecutor(
+            self.config.resilience,
+            provider_name="OpenAI",
+            clock=clock,
+            sleeper=sleeper,
+        )
 
     def complete(self, prompt: str, *, temperature: float, max_output_tokens: int) -> ModelResponse:
         env_name = self.config.api_key_env or "OPENAI_API_KEY"
@@ -31,8 +38,9 @@ class OpenAIProvider(Provider):
             raise ProviderAuthError(
                 f"{env_name} is not set. Set it before using the OpenAI provider."
             )
-        start = time.perf_counter()
-        try:
+        start = self.executor.clock()
+
+        def _attempt(timeout: float) -> ModelResponse:
             response = httpx.post(
                 (self.config.base_url or "https://api.openai.com/v1").rstrip("/")
                 + "/chat/completions",
@@ -43,7 +51,7 @@ class OpenAIProvider(Provider):
                     "temperature": temperature,
                     "max_tokens": max_output_tokens,
                 },
-                timeout=60,
+                timeout=timeout,
             )
             response.raise_for_status()
             payload = response.json()
@@ -55,42 +63,14 @@ class OpenAIProvider(Provider):
                 output=output,
                 input_tokens=usage.get("prompt_tokens"),
                 output_tokens=usage.get("completion_tokens"),
-                latency_ms=round((time.perf_counter() - start) * 1000, 2),
+                latency_ms=round((self.executor.clock() - start) * 1000, 2),
                 model=self.config.model,
                 provider="openai",
                 resolved_model=payload.get("model"),
                 system_fingerprint=payload.get("system_fingerprint"),
                 estimated_cost_usd=None,
             )
-        except httpx.TimeoutException as exc:
-            raise ProviderTimeoutError(
-                f"OpenAI request failed: timeout ({type(exc).__name__})"
-            ) from exc
-        except httpx.HTTPStatusError as exc:
-            status = exc.response.status_code
-            if status in (401, 403):
-                raise ProviderAuthError(
-                    f"OpenAI request failed: HTTP {status} (authentication error). Check your API key."
-                ) from exc
-            if status == 429:
-                raise ProviderRateLimitError(
-                    f"OpenAI request failed: HTTP {status} (rate limit exceeded). Check your quota."
-                ) from exc
-            raise ProviderError(f"OpenAI request failed: HTTP {status}") from exc
-        except (httpx.ConnectError, httpx.NetworkError) as exc:
-            raise ProviderConnectionError(
-                f"OpenAI request failed: connection error ({type(exc).__name__})"
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise ProviderError(f"OpenAI request failed: {type(exc).__name__}") from exc
-        except (
-            KeyError,
-            ValueError,
-            IndexError,
-            TypeError,
-            AttributeError,
-        ) as exc:
-            # Do not include response bodies: they can contain sensitive prompt data.
-            raise ProviderResponseError(
-                f"OpenAI request failed: malformed response ({type(exc).__name__})"
-            ) from exc
+
+        res = self.executor.execute(_attempt, start_time=start)
+        res.latency_ms = round((self.executor.clock() - start) * 1000, 2)
+        return res

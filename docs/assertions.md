@@ -143,6 +143,7 @@ Passes if the provider response time is at or below the limit in milliseconds.
 ```yaml
 - type: latency_ms
   value: 3000
+  tolerance_percent: 15
 ```
 
 ### `cost_usd`
@@ -153,6 +154,7 @@ Passes if an available estimated cost is at or below the limit. OpenAI-compatibl
 - type: cost_usd
   value: 0.05
   severity: warn
+  tolerance_percent: 10
 ```
 
 Regex syntax and numeric limits are validated when loading configuration. JSON schemas may use local fragment references only (`#...`); evaluation never retrieves remote schemas. `output.format: json` on a test is also enforced as a JSON-validity contract.

@@ -1,0 +1,20 @@
+{
+  "id": "chatcmpl-invalid-content",
+  "object": "chat.completion",
+  "model": "test-model",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "PRIVATE_NON_STRING_CONTENT"
+          }
+        ]
+      },
+      "finish_reason": "stop"
+    }
+  ]
+}

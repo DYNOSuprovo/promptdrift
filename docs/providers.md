@@ -16,6 +16,21 @@ provider:
   base_url: https://api.openai.com/v1  # optional, for proxies or compatible APIs
 ```
 
+### Supported response shape
+
+The adapter accepts non-streaming Chat Completions responses containing at least one
+choice with a `message.content` string. The top-level `usage`, `model`, and
+`system_fingerprint` fields are optional; when absent, the corresponding normalized
+values remain unknown.
+
+Responses without `choices`, with an empty `choices` array, without a
+`message.content` string, or with malformed JSON are rejected with a safe
+`ProviderError`. Tool-only, multimodal, and other non-text response shapes are
+intentionally unsupported.
+
+Provider error messages do not include response bodies, so malformed or invalid
+responses cannot expose provider-returned prompt/output data through the error.
+
 ### Environment
 
 ```bash

@@ -190,22 +190,91 @@ Beyond static testing, PromptDrift can learn from real traffic:
 - Not a statistical guarantee of model-weight changes.
 - Not an automatic baseline approval system.
 
+## Technologies Used
+
+PromptDrift is built with modern, lightweight Python tooling designed for speed, type safety, and minimal dependencies:
+
+- **Core Runtime & CLI:** [Python 3.11+](https://www.python.org/) and [Typer](https://typer.tiangolo.com/) for ergonomic, type-hinted command-line interfaces.
+- **Data Validation & Schemas:** [Pydantic v2](https://docs.pydantic.dev/) (with strict `extra="forbid"` models) and [JSON Schema](https://json-schema.org/) for deterministic assertion validation.
+- **Templating & Formats:** [Jinja2](https://palletsprojects.com/p/jinja/) for variable-interpolated prompt rendering, and [PyYAML](https://pyyaml.org/) for configuration parsing.
+- **Terminal UI & Diagnostics:** [Rich](https://rich.readthedocs.io/) for formatted tables, progress displays, and diff reporting.
+- **Local History Storage:** SQLite (`sqlite3` from Python's standard library) for privacy-minimized, zero-external-dependency local run tracking.
+- **HTTP & Providers:** [HTTPX](https://www.python-httpx.org/) for provider client communication and network-isolated fixtures.
+- **Packaging & Quality:** [Hatchling](https://hatch.pypa.io/) for standards-compliant builds, [Pytest](https://docs.pytest.org/) & [pytest-cov](https://pytest-cov.readthedocs.io/) for offline test suites, and [Ruff](https://docs.astral.sh/ruff/) for ultra-fast linting and formatting.
+
+## Winter of Code Social (WoCS) 2026
+
+PromptDrift is an official mentoring organization for **Winter of Code Social (WoCS) 2026**! We warmly welcome student and first-time open-source contributors.
+
+### Where to Find Available Issues
+
+All contributor tasks are tracked on GitHub Issues and tagged with the following labels:
+- **`wocs`**: All issues approved and open for WoCS 2026 participants.
+- **`level 1`**: Small, beginner-friendly tasks (documentation, simple assertions, isolated regex patterns, CLI smoke tests).
+- **`level 2`**: Moderate implementation tasks (new reporting formats, tolerance evaluations, provider error handling, streaming wrappers).
+- **`level 3`**: Substantial / complex features (new provider adapters, historical observation promotion, request-envelope provenance hashing, bounded resilience backoff).
+
+Browse our [open WoCS issues](https://github.com/tanveer-arch/promptdrift/issues?q=is%3Aissue+is%3Aopen+label%3Awocs).
+
+### How to Get Started
+
+1. **Read the guides:** Review this README and read [CONTRIBUTING.md](CONTRIBUTING.md) thoroughly before beginning.
+2. **Claim an issue:** Do **not** submit unassigned PRs. Comment on an open issue requesting assignment, wait for a Project Admin or Mentor to assign it to you, and work on only one issue at a time.
+3. **Follow the AI Policy:** Ensure all contributions adhere to our project AI policy detailed below.
+
+## AI Policy
+
+> **AI allowed with restrictions:** Contributors may use AI tools (e.g. GitHub Copilot, ChatGPT, Claude) for research, ideation, drafting, or debugging. However, **all submitted code, tests, and documentation must be fully understood, verified, and tested by the author**. Pure copy-paste AI code, hallucinated dependencies, and unreviewed auto-generated pull requests are strictly prohibited and will be rejected. Contributors are expected to explain and defend every design decision in their PR review.
+
+## Local Installation & Development Setup
+
+To contribute or test changes locally, set up a development environment:
+
+### Prerequisites
+
+- Python 3.11 or higher
+- Git
+- (Optional) Node.js 22+ (only required if developing the GitHub Action runner in `action/`)
+
+### Setup Instructions
+
+1. **Fork and clone the repository:**
+   ```bash
+   git clone https://github.com/<your-username>/promptdrift.git
+   cd promptdrift
+   ```
+
+2. **Create and activate a virtual environment:**
+   ```bash
+   # On macOS/Linux:
+   python3 -m venv .venv
+   source .venv/bin/activate
+
+   # On Windows (PowerShell):
+   python -m venv .venv
+   .venv\Scripts\Activate.ps1
+   ```
+
+3. **Install editable package with development dependencies:**
+   ```bash
+   pip install -e ".[dev]"
+   ```
+
+4. **Verify your local setup:**
+   ```bash
+   python -m pytest
+   ruff check src tests action
+   ruff format --check src tests action
+   ```
+
+All unit tests run completely offline and use local mock fixtures—no external API keys or network connection required!
+
 ## Contributing
 
-We welcome contributions! The engine, providers, and evaluators are intentionally decoupled to make adding features straightforward.
+We welcome contributions from everyone! The PromptDrift engine, providers, and evaluators are intentionally decoupled to make adding features straightforward and safe.
 
-- **Setup:** See [CONTRIBUTING.md](CONTRIBUTING.md) for local development instructions.
-- **Run tests:** `python -m pytest`
-
-### Looking for a way to contribute?
-
-Check out our [Roadmap](docs/roadmap.md) for maintainer-reviewed candidates, including:
-- OpenAI-compatible fixture coverage.
-- Ollama provenance tests.
-- Monitoring history reliability.
-- Provider error taxonomy.
-- GitHub Action report-contract testing.
-- Cross-platform CLI coverage.
+- **Contribution Guide:** Please read [CONTRIBUTING.md](CONTRIBUTING.md) for full step-by-step instructions on claiming issues, code conventions, test isolation, and opening pull requests.
+- **Roadmap Candidates:** Check out [docs/roadmap.md](docs/roadmap.md) for planned architectural milestones.
 
 ## Documentation
 

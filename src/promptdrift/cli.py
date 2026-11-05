@@ -30,7 +30,7 @@ from .errors import (
     TemplateError,
 )
 from .git import GitContext
-from .reports import print_impact_report, print_report, write_html_report
+from .reports import print_impact_report, print_report, write_html_report, write_junit_xml
 from .storage import (
     add_or_update_scenarios,
     get_interactions,
@@ -48,6 +48,16 @@ app = typer.Typer(
 console = Console()
 
 
+def _is_unicode_supported(console_instance: Console | None = None) -> bool:
+    target = console_instance or console
+    encoding = getattr(target, "encoding", None) or getattr(sys.stdout, "encoding", None) or "utf-8"
+    try:
+        "✓✗".encode(encoding)
+        return True
+    except (UnicodeEncodeError, LookupError):
+        return False
+
+
 def _exit_error(error: Exception, verbose: bool = False) -> None:
     if verbose:
         raise error
@@ -62,7 +72,7 @@ def _exit_error(error: Exception, verbose: bool = False) -> None:
     raise typer.Exit(code=code)
 
 
-def _run(config: str, with_baseline: bool, verbose: bool):
+def _run(config: Path | str, with_baseline: bool, verbose: bool):
     try:
         loaded, config_path = load_config(config)
         loaded, _ = resolve_suite(loaded, config_path)
@@ -216,9 +226,10 @@ def learn(
     if json_output:
         typer.echo(json.dumps([s.model_dump() for s in scenarios], indent=2, default=str))
     else:
-        console.print(f"[green]✓[/] {len(interactions)} interactions loaded")
+        mark = "✓" if _is_unicode_supported(console) else "OK"
+        console.print(f"[green]{mark}[/] {len(interactions)} interactions loaded")
         console.print(
-            f"[green]✓[/] {len(scenarios)} candidate scenarios discovered and saved to .promptdrift/scenarios.json"
+            f"[green]{mark}[/] {len(scenarios)} candidate scenarios discovered and saved to .promptdrift/scenarios.json"
         )
         console.print("\nReview candidates with: [bold]promptdrift scenarios[/bold]")
         console.print("Promote candidates with: [bold]promptdrift promote <scenario-id>[/bold]")
@@ -264,9 +275,12 @@ def suggest(
     if json_output:
         typer.echo(json.dumps([a.model_dump() for a in suggestions], indent=2))
     else:
+        mark = "✓" if _is_unicode_supported(console) else "OK"
         console.print(f"[bold]Suggested contracts for {scenario_id}:[/bold]")
         for a in suggestions:
-            console.print(f"  ✓ {a.type} -> {a.value or a.schema_ or ''} (severity: {a.severity})")
+            console.print(
+                f"  {mark} {a.type} -> {a.value or a.schema_ or ''} (severity: {a.severity})"
+            )
 
 
 @app.command()
@@ -297,7 +311,9 @@ def promote(
 
 @app.command()
 def check(
-    config: Annotated[str, typer.Option("--config", "-c")] = "promptdrift.yaml",
+    config: Annotated[Path, typer.Option("--config", "-c", help="Config file path.")] = Path(
+        "promptdrift.yaml"
+    ),
     base: Annotated[
         str | None,
         typer.Option("--base", help="Git base ref (e.g. origin/main) for selective check."),
@@ -306,12 +322,18 @@ def check(
         bool, typer.Option("--json", help="Emit machine-readable JSON.")
     ] = False,
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
+    junit_xml: Annotated[
+        Path | None,
+        typer.Option("--junit-xml", help="Write a JUnit XML report."),
+    ] = None,
 ) -> None:
     """Git-aware scenario execution and Impact Radius report."""
     try:
         loaded, config_path = load_config(config)
         report, impact = orchestrate_check(loaded, config_path, base_ref=base)
         record_report(report, store_raw_output=loaded.baseline.store_raw_output)
+        if junit_xml is not None:
+            write_junit_xml(report, junit_xml, impact=impact)
 
         if json_output:
             out_data = {
@@ -334,7 +356,9 @@ def check(
 
 @app.command()
 def accept(
-    config: Annotated[str, typer.Option("--config", "-c")] = "promptdrift.yaml",
+    config: Annotated[Path, typer.Option("--config", "-c", help="Config file path.")] = Path(
+        "promptdrift.yaml"
+    ),
     scenario: Annotated[
         list[str], typer.Option("--scenario", "-s", help="Selectively accept specific scenarios.")
     ] = [],
@@ -344,6 +368,12 @@ def accept(
     accept_regressions: Annotated[
         bool, typer.Option("--accept-regressions", help="Accept REGRESSED scenarios.")
     ] = False,
+    run_id: Annotated[
+        str | None,
+        typer.Option(
+            "--run-id", help="Promote a reviewed run from monitoring history to baseline."
+        ),
+    ] = None,
     force: Annotated[
         bool, typer.Option(help="Overwrite existing baseline without confirmation.")
     ] = False,
@@ -353,7 +383,7 @@ def accept(
     """Accept current behavior as the new canonical baseline."""
     try:
         from promptdrift.config import load_config
-        from promptdrift.engine.accept import selective_accept
+        from promptdrift.engine.accept import accept_from_history, selective_accept
         from promptdrift.engine.baseline import load_baseline
         from promptdrift.engine.baseline_history import archive_baseline
         from promptdrift.engine.check import orchestrate_check
@@ -369,7 +399,20 @@ def accept(
                 console.print("[yellow]Aborted.[/]")
                 return
 
-        if not path.exists():
+        if run_id:
+            if changed:
+                raise BaselineError(
+                    "--changed cannot be combined with --run-id. Use --scenario to select cases."
+                )
+            accept_from_history(
+                loaded,
+                config_path,
+                run_id=run_id,
+                scenario_ids=scenario if scenario else None,
+                accept_regressions=accept_regressions,
+                force=True,
+            )
+        elif not path.exists():
             if scenario or changed:
                 raise BaselineError(
                     "Selective acceptance requires an existing baseline. Create a full reviewed baseline first."
@@ -408,9 +451,15 @@ def accept(
             atomic_write(path, content)
 
         if json_output:
-            typer.echo(json.dumps({"baseline": str(path), "status": "accepted"}, indent=2))
+            payload = {"baseline": str(path), "status": "accepted"}
+            if run_id:
+                payload["promoted_run_id"] = run_id
+            typer.echo(json.dumps(payload, indent=2))
         else:
-            console.print(f"[green]Accepted new baseline:[/] {path}")
+            if run_id:
+                console.print(f"[green]Accepted new baseline from history run {run_id}:[/] {path}")
+            else:
+                console.print(f"[green]Accepted new baseline:[/] {path}")
     except PromptDriftError as error:
         _exit_error(error, verbose)
 
@@ -430,21 +479,32 @@ def purge(
 
 @app.command()
 def test(
-    config: Annotated[str, typer.Option("--config", "-c")] = "promptdrift.yaml",
+    config: Annotated[Path, typer.Option("--config", "-c", help="Config file path.")] = Path(
+        "promptdrift.yaml"
+    ),
     json_output: Annotated[
         bool, typer.Option("--json", help="Emit machine-readable JSON.")
     ] = False,
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
+    junit_xml: Annotated[
+        Path | None,
+        typer.Option("--junit-xml", help="Write a JUnit XML report."),
+    ] = None,
 ) -> None:
     """Run behavioral contracts; automatically compares an existing baseline."""
     result = _run(config, with_baseline=True, verbose=verbose)
     if result:
+        if junit_xml is not None:
+            write_junit_xml(result[2], junit_xml)
+
         _emit(result[2], json_output)
 
 
 @app.command()
 def baseline(
-    config: Annotated[str, typer.Option("--config", "-c")] = "promptdrift.yaml",
+    config: Annotated[Path, typer.Option("--config", "-c", help="Config file path.")] = Path(
+        "promptdrift.yaml"
+    ),
     force: Annotated[bool, typer.Option(help="Replace an existing baseline.")] = False,
     accept_regressions: Annotated[
         bool, typer.Option("--accept-regressions", help="Explicitly allow a failing baseline.")
@@ -482,7 +542,9 @@ def baseline(
 
 @app.command()
 def baselines(
-    config: Annotated[str, typer.Option("--config", "-c")] = "promptdrift.yaml",
+    config: Annotated[Path, typer.Option("--config", "-c", help="Config file path.")] = Path(
+        "promptdrift.yaml"
+    ),
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """List canonical baseline and archived history."""
@@ -528,7 +590,9 @@ def baselines(
 
 @app.command()
 def diff(
-    config: Annotated[str, typer.Option("--config", "-c")] = "promptdrift.yaml",
+    config: Annotated[Path, typer.Option("--config", "-c", help="Config file path.")] = Path(
+        "promptdrift.yaml"
+    ),
     json_output: Annotated[bool, typer.Option("--json")] = False,
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
 ) -> None:
@@ -540,8 +604,12 @@ def diff(
 
 @app.command()
 def report(
-    config: Annotated[str, typer.Option("--config", "-c")] = "promptdrift.yaml",
-    output: Annotated[Path, typer.Option("--output", "-o")] = Path("promptdrift-report.html"),
+    config: Annotated[Path, typer.Option("--config", "-c", help="Config file path.")] = Path(
+        "promptdrift.yaml"
+    ),
+    output: Annotated[Path, typer.Option("--output", "-o", help="Output report file path.")] = Path(
+        "promptdrift-report.html"
+    ),
     json_output: Annotated[bool, typer.Option("--json")] = False,
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
 ) -> None:
@@ -559,7 +627,9 @@ def report(
 
 @app.command()
 def doctor(
-    config: Annotated[str, typer.Option("--config", "-c")] = "promptdrift.yaml",
+    config: Annotated[Path, typer.Option("--config", "-c", help="Config file path.")] = Path(
+        "promptdrift.yaml"
+    ),
     privacy: Annotated[
         bool, typer.Option("--privacy", help="Inspect privacy and local data storage.")
     ] = False,
@@ -621,7 +691,7 @@ def doctor(
         typer.echo(json.dumps({"checks": checks}, indent=2))
     else:
         console.print("[bold]PromptDrift Doctor[/]")
-        unicode_console = (sys.stdout.encoding or "").lower().replace("-", "") in {"utf8", "utf_8"}
+        unicode_console = _is_unicode_supported(console)
         for check in checks:
             good, bad = ("✓", "✗") if unicode_console else ("OK", "X")
             console.print(
@@ -633,7 +703,9 @@ def doctor(
 
 @app.command()
 def monitor(
-    config: Annotated[str, typer.Option("--config", "-c")] = "promptdrift.yaml",
+    config: Annotated[Path, typer.Option("--config", "-c", help="Config file path.")] = Path(
+        "promptdrift.yaml"
+    ),
     samples: Annotated[
         int, typer.Option(help="Probes per case (1-20); each may incur provider cost.")
     ] = 3,
@@ -679,11 +751,11 @@ def monitor(
 @app.command()
 def history(
     config: Annotated[
-        str,
+        Path,
         typer.Option(
             "--config", "-c", help="Config path determines the project history directory."
         ),
-    ] = "promptdrift.yaml",
+    ] = Path("promptdrift.yaml"),
     limit: Annotated[int, typer.Option(min=1, max=1000)] = 20,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
@@ -691,7 +763,7 @@ def history(
     from .storage.history import history_path, load_monitor_history
 
     try:
-        runs = load_monitor_history(history_path(Path(config).resolve()), limit=limit)
+        runs = load_monitor_history(history_path(config.resolve()), limit=limit)
     except PromptDriftError as error:
         if json_output:
             typer.echo(

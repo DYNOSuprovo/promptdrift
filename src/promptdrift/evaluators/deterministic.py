@@ -118,22 +118,35 @@ def evaluate_assertion(assertion: Assertion, response: ModelResponse) -> Evaluat
         )
     if kind == "latency_ms":
         actual, expected = response.latency_ms, float(value)
-        return _result(
-            assertion,
-            actual <= expected,
-            expected,
-            actual,
-            "Latency limit met." if actual <= expected else "Latency limit exceeded.",
-        )
+        tolerance = assertion.tolerance_percent
+        upper_bound = expected * (1 + tolerance / 100) if tolerance is not None else expected
+        passed = actual <= upper_bound
+        within_tolerance = passed and actual > expected and tolerance is not None
+
+        if within_tolerance:
+            reason = (
+                f"Latency {actual:g}ms passed (within {tolerance:g}% tolerance of {expected:g}ms)."
+            )
+        else:
+            reason = "Latency limit met." if passed else "Latency limit exceeded."
+
+        return _result(assertion, passed, expected, actual, reason)
     if kind == "cost_usd":
         if response.estimated_cost_usd is None:
             return _result(assertion, False, float(value), None, "Estimated cost is unavailable.")
         actual, expected = response.estimated_cost_usd, float(value)
-        return _result(
-            assertion,
-            actual <= expected,
-            expected,
-            actual,
-            "Estimated cost limit met." if actual <= expected else "Estimated cost limit exceeded.",
-        )
+        tolerance = assertion.tolerance_percent
+        upper_bound = expected * (1 + tolerance / 100) if tolerance is not None else expected
+        passed = actual <= upper_bound
+        within_tolerance = passed and actual > expected and tolerance is not None
+
+        if within_tolerance:
+            reason = (
+                f"Estimated cost ${actual:g} passed "
+                f"(within {tolerance:g}% tolerance of ${expected:g})."
+            )
+        else:
+            reason = "Estimated cost limit met." if passed else "Estimated cost limit exceeded."
+
+        return _result(assertion, passed, expected, actual, reason)
     raise EvaluationError(f"Unsupported assertion type: {kind}")

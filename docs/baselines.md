@@ -30,11 +30,34 @@ New baselines use **schema version 3**. The loader still accepts v1 (migrated to
 | `tests.<id>.output_hash` | SHA-256 of the output; wording change is not automatically a regression |
 | `status`, `assertions` | Accepted contract results |
 | `metrics` | Observed latency/token counts/available cost, not a statistical distribution |
-| `provenance` | Per-case hashes of rendered input, settings, provider and contracts; PromptDrift version; optional response metadata hashes |
+| `provenance` | Per-case hashes of rendered input, settings, provider and contracts; PromptDrift version; optional response metadata hashes; optional `envelope_hashes` |
 
 Provenance is optional for compatibility. A legacy or manually constructed baseline without it produces `insufficient_evidence` in monitoring. Review and recreate the reference to enable unchanged-input comparisons; missing evidence is never invented during migration.
 
 No raw prompts or responses are saved in canonical baselines. **Hashes are not anonymization or encryption:** predictable content can be guessed, and case/model names may reveal information. Review the file before publishing. `baseline.store_raw_output` controls legacy local run storage, not baseline contents.
+
+## Request envelopes
+
+A test case can declare the rest of the request your application sends alongside the prompt template. PromptDrift hashes it for provenance only; it is **not sent to the provider** and tools are never executed.
+
+```yaml
+tests:
+  - id: refund-policy
+    prompt: prompts/support.txt
+    request_envelope:
+      system: You are a support agent.
+      tools:
+        - name: lookup_order
+          description: Find an order by id.
+          parameters: {type: object, properties: {order_id: {type: string}}}
+      retrieval_context:
+        policy: {refund_days: 30}
+```
+
+- `provenance.envelope_hashes` stores one SHA-256 per component: `system`, `tools` and `retrieval_context`. The template itself stays in `input_hash`, so it is never hashed twice.
+- Mapping key order does not matter. Tool names must be unique, and tools are hashed in name order, so reordering tools does not change the hash. Lists inside a tool's `parameters` (such as `required` or `enum`) keep their declared order.
+- Before hashing, scalar values under credential-named keys are removed at any depth (`api_key`, `x-api-key`, `token`, `access_token`, `refresh_token`, `session_token`, `secret`, `client_secret`, `password`, `private_key`, `authorization`, `credential(s)`, `cookie`, `set-cookie`). Matching ignores case, `-` and `_`, and is exact, so `max_tokens` is kept. Object values are kept, so a tool parameter schema named `password` still counts. Long `sk-…` and `Bearer …` strings are masked. Do not store real credentials in configuration regardless.
+- Cases without an envelope omit `envelope_hashes` entirely; their baselines are unchanged and existing v1–v3 baselines load as before. Promoted scenarios (`scenarios.json`) cannot declare an envelope yet.
 
 ## Selective acceptance
 

@@ -10,12 +10,49 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .test import TestCase
 
 
+class ResilienceConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    max_retries: int = Field(default=0, ge=0, le=10)
+    initial_backoff: float = Field(default=0.5, gt=0)
+    backoff_factor: float = Field(default=2.0, ge=1.0)
+    max_backoff: float = Field(default=10.0, gt=0)
+    timeout: float = Field(default=60.0, gt=0)
+    timeout_budget: float | None = Field(default=None, gt=0)
+    request_budget: int | None = Field(default=None, gt=0)
+
+
 class ProviderConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     type: Literal["openai", "ollama", "mock"]
     model: str = "mock"
     api_key_env: str | None = None
     base_url: str | None = None
+    timeout: float | None = None
+    max_retries: int | None = None
+    initial_backoff: float | None = None
+    backoff_factor: float | None = None
+    max_backoff: float | None = None
+    timeout_budget: float | None = None
+    request_budget: int | None = None
+    resilience: ResilienceConfig = Field(default_factory=ResilienceConfig)
+
+    @model_validator(mode="after")
+    def sync_resilience(self) -> ProviderConfig:
+        if self.timeout is not None:
+            self.resilience.timeout = self.timeout
+        if self.max_retries is not None:
+            self.resilience.max_retries = self.max_retries
+        if self.initial_backoff is not None:
+            self.resilience.initial_backoff = self.initial_backoff
+        if self.backoff_factor is not None:
+            self.resilience.backoff_factor = self.backoff_factor
+        if self.max_backoff is not None:
+            self.resilience.max_backoff = self.max_backoff
+        if self.timeout_budget is not None:
+            self.resilience.timeout_budget = self.timeout_budget
+        if self.request_budget is not None:
+            self.resilience.request_budget = self.request_budget
+        return self
 
 
 class Defaults(BaseModel):

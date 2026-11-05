@@ -48,7 +48,7 @@ Discovers git repository root, detects current branch and commit SHA, and identi
 - **`suggest.py`** — Automatically derives contract suggestions (JSON validity, schema, length bounds, policy rules).
 - **`check.py`** — Orchestrates conservative Git-aware selective test execution and computes impact radius. Unknown changed paths cause full-suite execution.
 - **`suite.py`** — Resolves YAML cases and promoted scenarios consistently across commands; rejects empty suites.
-- **`provenance.py`** — Canonical per-case request/settings/provider/contract fingerprints.
+- **`provenance.py`** — Canonical per-case request/settings/provider/contract fingerprints, plus credential-stripped per-component hashes of an optional declared request envelope (system message, tool schemas, static retrieval context).
 - **`monitor.py`** — Fresh full-suite repeated probes; conservative evidence-based triage independent of Git changes. Uses the same contracts as the ordinary runner, not a separate evaluator framework.
 
 ### `impact.py` — Impact Radius & Classification
@@ -71,4 +71,4 @@ Categorizes before/after behavioral deltas into `REGRESSED`, `IMPROVED`, `UNCHAN
 
 The engine owns diagnosis; adapters only normalize responses and optional provider metadata. Transport failures never become model-drift evidence. `action/run.py` preserves the CLI's result while normalizing and redacting artifacts before failure enforcement; `action/publish.cjs` handles opt-in GitHub publication independently.
 
-See [monitoring](monitoring.md) for attribution limits. In particular, hashes do not attest to application code, tools or retrieval state, and no statistical significance or semantic-judge capability is claimed.
+See [monitoring](monitoring.md) for attribution limits. In particular, hashes do not attest to application code or live tool/retrieval state (a request envelope records only what the test case declares), and no statistical significance or semantic-judge capability is claimed.

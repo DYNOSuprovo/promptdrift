@@ -1,0 +1,17 @@
+{
+  "id": "chatcmpl-test-no-usage",
+  "object": "chat.completion",
+  "created": 1767225600,
+  "model": "test-model",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Hello WITHOUT_USAGE_SENTINEL"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "system_fingerprint": "fp_test_123"
+}
