@@ -52,7 +52,9 @@ class OllamaProvider(Provider):
                 estimated_cost_usd=0.0,
             )
         except httpx.TimeoutException as exc:
-            raise ProviderTimeoutError(f"Ollama request failed: timeout ({type(exc).__name__})") from exc
+            raise ProviderTimeoutError(
+                f"Ollama request failed: timeout ({type(exc).__name__})"
+            ) from exc
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
             if status in (401, 403):
@@ -74,4 +76,3 @@ class OllamaProvider(Provider):
             raise ProviderResponseError(
                 f"Ollama request failed: malformed response ({type(exc).__name__})"
             ) from exc
-

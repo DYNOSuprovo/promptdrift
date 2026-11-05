@@ -114,7 +114,12 @@ class TestOpenAIProvider:
         def fake_post(*args, **kwargs):
             return httpx.Response(
                 401,
-                json={"error": {"message": "Invalid API key provided", "type": "invalid_request_error"}},
+                json={
+                    "error": {
+                        "message": "Invalid API key provided",
+                        "type": "invalid_request_error",
+                    }
+                },
                 request=httpx.Request("POST", "https://example.test"),
             )
 

@@ -28,7 +28,9 @@ class OpenAIProvider(Provider):
         env_name = self.config.api_key_env or "OPENAI_API_KEY"
         api_key = os.environ.get(env_name)
         if not api_key:
-            raise ProviderAuthError(f"{env_name} is not set. Set it before using the OpenAI provider.")
+            raise ProviderAuthError(
+                f"{env_name} is not set. Set it before using the OpenAI provider."
+            )
         start = time.perf_counter()
         try:
             response = httpx.post(
@@ -61,7 +63,9 @@ class OpenAIProvider(Provider):
                 estimated_cost_usd=None,
             )
         except httpx.TimeoutException as exc:
-            raise ProviderTimeoutError(f"OpenAI request failed: timeout ({type(exc).__name__})") from exc
+            raise ProviderTimeoutError(
+                f"OpenAI request failed: timeout ({type(exc).__name__})"
+            ) from exc
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
             if status in (401, 403):
@@ -90,4 +94,3 @@ class OpenAIProvider(Provider):
             raise ProviderResponseError(
                 f"OpenAI request failed: malformed response ({type(exc).__name__})"
             ) from exc
-
